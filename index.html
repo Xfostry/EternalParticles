@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sistema de Partículas 3D Controlado con una Mano</title>
+  <style>
+    :root {
+      --bg-color: rgba(20, 20, 20, 0.75);
+      --text-color: #ffffff;
+      --accent-color: #00ffcc;
+    }
+
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: #050505;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: var(--text-color);
+    }
+
+    #canvas-container {
+      width: 100vw;
+      height: 100vh;
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+    }
+
+    #webcam {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      width: 180px;
+      height: 135px;
+      object-fit: cover;
+      border-radius: 8px;
+      border: 2px solid var(--accent-color);
+      transform: scaleX(-1);
+      z-index: 10;
+      background: #000;
+    }
+
+    .ui-panel {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      z-index: 10;
+      background: var(--bg-color);
+      backdrop-filter: blur(12px);
+      padding: 24px;
+      border-radius: 16px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.37);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      width: 300px;
+      pointer-events: auto;
+    }
+
+    .ui-panel h2 {
+      margin: 0 0 20px 0;
+      font-size: 18px;
+      letter-spacing: 1px;
+      color: var(--accent-color);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      padding-bottom: 10px;
+    }
+
+    .control-group { margin-bottom: 20px; }
+
+    .control-group label {
+      display: block;
+      font-size: 12px;
+      margin-bottom: 8px;
+      color: #aaa;
+    }
+
+    select {
+      width: 100%;
+      padding: 10px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 8px;
+      color: white;
+      font-size: 14px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    option {
+      background: #222;
+      color: #fff;
+    }
+
+    .color-picker-wrapper {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    input[type="color"] {
+      -webkit-appearance: none;
+      border: none;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      cursor: pointer;
+      background: none;
+    }
+
+    input[type="color"]::-webkit-color-swatch {
+      border: 2px solid rgba(255,255,255,0.5);
+      border-radius: 50%;
+    }
+
+    .status-box {
+      font-size: 13px;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 8px;
+      border-left: 4px solid #fff;
+      margin-top: 10px;
+      line-height: 1.5;
+    }
+
+    .status-box.active {
+      border-left-color: var(--accent-color);
+      color: var(--accent-color);
+    }
+
+    .top-right-controls {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      z-index: 10;
+    }
+
+    .btn {
+      background: var(--bg-color);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: white;
+      padding: 10px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    #loading {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      font-size: 16px;
+      z-index: 100;
+      background: rgba(0,0,0,0.85);
+      padding: 15px 30px;
+      border-radius: 30px;
+      border: 1px solid var(--accent-color);
+      max-width: 80vw;
+      text-align: center;
+    }
+  </style>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+
+<body>
+  <div id="loading">Cargando sistema de partículas y cámara...</div>
+  <div id="canvas-container"></div>
+
+  <video id="webcam" autoplay playsinline muted></video>
+
+  <div class="ui-panel">
+    <h2>Centro de control de partículas</h2>
+
+    <div class="control-group">
+      <label>Figura de partículas 3D</label>
+      <select id="model-select">
+        <option value="saturn">Saturno</option>
+        <option value="tree">Árbol de Navidad</option>
+        <option value="heart">Corazón</option>
+        <option value="nebula">Nebulosa</option>
+      </select>
+    </div>
+
+    <div class="control-group">
+      <label>Color de las partículas</label>
+      <div class="color-picker-wrapper">
+        <input type="color" id="particle-color" value="#00ffcc" />
+        <span id="color-hex">#00ffcc</span>
+      </div>
+    </div>
+
+    <div class="status-box" id="gesture-status">
+      Partículas listas. Esperando permiso para la cámara...
+    </div>
+  </div>
+
+  <div class="top-right-controls">
+    <button class="btn" id="btn-fullscreen">Pantalla completa</button>
+  </div>
+
+  <script>
+    let scene, camera, renderer, controls;
+    let particleGeometry, particleSystem;
+
+    // Antes eran 80k partículas pero muchas PCs sufrían.
+    // Con 35k sigue viéndose brutal.
+    const PARTICLE_COUNT = 35000;
+
+    const targetPositions = {
+      heart: new Float32Array(PARTICLE_COUNT * 3),
+      saturn: new Float32Array(PARTICLE_COUNT * 3),
+      tree: new Float32Array(PARTICLE_COUNT * 3),
+      nebula: new Float32Array(PARTICLE_COUNT * 3),
+      orion: new Float32Array(PARTICLE_COUNT * 3),
+      paw: new Float32Array(PARTICLE_COUNT * 3)
+    };
+
+    let currentModel = "saturn";
+    let gestureScale = 1.0;
+    let targetGestureScale = 1.0;
+    let targetRotationX = 0;
+    let targetRotationY = 0;
+
+    // Escala base para que el modelo llene buena parte de la pantalla.
+    const BASE_MODEL_SCALE = 1.75;
+    const MIN_GESTURE_SCALE = 0.35;
+    const MAX_GESTURE_SCALE = 2.4;
+    const PALM_SIZE_MIN = 0.07;
+    const PALM_SIZE_MAX = 0.22;
+    const PALM_SIZE_SCALE_ONE = 0.12;
+
+    function mapPalmSizeToScale(palmSize) {
+      if (palmSize <= PALM_SIZE_SCALE_ONE) {
+        return THREE.MathUtils.mapLinear(
+          palmSize,
+          PALM_SIZE_MIN,
+          PALM_SIZE_SCALE_ONE,
+          MIN_GESTURE_SCALE,
+          1.0
+        );
+      }
+
+      return THREE.MathUtils.mapLinear(
+        palmSize,
+        PALM_SIZE_SCALE_ONE,
+        PALM_SIZE_MAX,
+        1.0,
+        MAX_GESTURE_SCALE
+      );
+    }
+
+    function generateModelPositions() {
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const i3 = i * 3;
+
+        // Árbol
+        if (i < PARTICLE_COUNT * 0.08) {
+          const angle = Math.random() * Math.PI * 2;
+          const starWave = Math.abs(Math.sin(angle * 5));
+          const r = (1.8 + starWave * 3.0) * Math.sqrt(Math.random());
+          targetPositions.tree[i3] = r * Math.cos(angle);
+          targetPositions.tree[i3 + 1] = 20 + (Math.random() - 0.5) * 1.5;
+          targetPositions.tree[i3 + 2] = r * Math.sin(angle) * 0.45;
+        } else if (i < PARTICLE_COUNT * 0.92) {
+          const h = Math.random() * 32 - 14;
+          const layerNormalized = (h + 14) / 32;
+          const layerProgress = (layerNormalized * 4) % 1.0;
+          let baseRadius = (1.0 - layerNormalized) * 18;
+          baseRadius *= Math.pow(layerProgress, 0.42);
+          const angle = Math.random() * Math.PI * 2;
+          const r = Math.max(0, baseRadius * Math.sqrt(Math.random()) + (Math.random() - 0.5) * 2.5);
+          targetPositions.tree[i3] = Math.cos(angle) * r;
+          targetPositions.tree[i3 + 1] = h;
+          targetPositions.tree[i3 + 2] = Math.sin(angle) * r;
+        } else {
+          const h = Math.random() * 5 - 19;
+          const r = Math.random() * 2.2;
+          const angle = Math.random() * Math.PI * 2;
+          targetPositions.tree[i3] = Math.cos(angle) * r;
+          targetPositions.tree[i3 + 1] = h;
+          targetPositions.tree[i3 + 2] = Math.sin(angle) * r;
+        }
+
+        // Saturno
+        if (i < PARTICLE_COUNT * 0.42) {
+          const theta = Math.random() * Math.PI * 2;
+          const phi = Math.acos(2 * Math.random() - 1);
+          const latFlatten = 0.82 + Math.random() * 0.06;
+          const r = 11.5 * Math.cbrt(Math.random());
+          targetPositions.saturn[i3] = r * Math.sin(phi) * Math.cos(theta);
+          targetPositions.saturn[i3 + 1] = r * Math.sin(phi) * Math.sin(theta) * latFlatten;
+          targetPositions.saturn[i3 + 2] = r * Math.cos(phi);
+        } else {
+          const ringBand = Math.random();
+          const bandBase =
+            ringBand < 0.22 ? 14.5 :
+            ringBand < 0.48 ? 18.5 :
+            ringBand < 0.72 ? 23.5 :
+            28.5;
+          const rRing = bandBase + Math.random() * 3.5 + Math.sin(bandBase * 1.7 + i * 0.013) * 0.9;
+          const thetaRing = Math.random() * Math.PI * 2;
+          const ringRipple = Math.sin(thetaRing * 10 + rRing * 0.9) * 0.45 + Math.sin(thetaRing * 23) * 0.18;
+          const ringThickness = (Math.random() - 0.5) * (0.45 + ringBand * 0.85);
+          targetPositions.saturn[i3] = (rRing + ringRipple) * Math.cos(thetaRing);
+          targetPositions.saturn[i3 + 1] = ringThickness;
+          targetPositions.saturn[i3 + 2] = (rRing + ringRipple) * Math.sin(thetaRing);
+        }
+
+        // Corazón
+        const t = Math.PI * 2 * Math.random();
+        const u = Math.PI * (Math.random() - 0.5);
+        const x = 16 * Math.pow(Math.sin(t), 3);
+        const y = 13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t);
+        const z = 6 * Math.sin(u) * (1 - Math.abs(Math.sin(t)));
+        targetPositions.heart[i3] = x * 1.35;
+        targetPositions.heart[i3 + 1] = y * 1.35;
+        targetPositions.heart[i3 + 2] = z * 1.35;
+        // ============================================================
+        // NEBULOSA
+        // Estructura: núcleo brillante denso + 3 brazos espirales
+        // logarítmicos con grumos + nube difusa exterior +
+        // vacío entre regiones + profundidad 3D con achatamiento.
+        // ============================================================
+        {
+          const nbRoll = Math.random();
+          let nx, ny, nz;
+          if (nbRoll < 0.30) {
+            // Núcleo brillante muy denso (zona central concentrada)
+            const cr = Math.pow(Math.random(), 0.6) * 3.2;
+            const cth = Math.random() * Math.PI * 2;
+            const cph = Math.acos(2 * Math.random() - 1);
+            nx = cr * Math.sin(cph) * Math.cos(cth);
+            ny = cr * Math.sin(cph) * Math.sin(cth) * 0.55;
+            nz = cr * Math.cos(cph);
+          } else if (nbRoll < 0.78) {
+            // Brazos espirales con grumos y turbulencia
+            const armPick = Math.floor(Math.random() * 3);
+            const armOffset = armPick * (Math.PI * 2 / 3);
+            const radius = 3.0 + Math.pow(Math.random(), 0.55) * 16.0;
+            const armAngle = armOffset + radius * 0.32 + (Math.random() - 0.5) * 0.55;
+            // Grosor variable del brazo: más denso en el medio, difuso en bordes
+            const armGau = (Math.random() + Math.random() + Math.random() - 1.5) * 1.6;
+            const armThick = 1.2 + Math.sin(radius * 0.7) * 0.5;
+            const localX = Math.cos(armAngle) * radius + Math.cos(armAngle + Math.PI / 2) * armGau * armThick;
+            const localZ = Math.sin(armAngle) * radius + Math.sin(armAngle + Math.PI / 2) * armGau * armThick;
+            // Pequeños grumos / cúmulos a lo largo del brazo
+            const clumpN = Math.floor(Math.random() * 5);
+            let cx = localX, cz = localZ;
+            for (let k = 0; k < clumpN; k++) {
+              const ck = Math.pow(Math.random(), 2) * 1.6;
+              const ca = Math.random() * Math.PI * 2;
+              cx += Math.cos(ca) * ck;
+              cz += Math.sin(ca) * ck;
+            }
+            const depth = (Math.random() - 0.5) * (4.0 + radius * 0.12);
+            nx = cx;
+            ny = depth * 0.45;
+            nz = cz;
+          } else {
+            // Nube difusa exterior (halo)
+            const hr = 4.0 + Math.pow(Math.random(), 0.4) * 22.0;
+            const hth = Math.random() * Math.PI * 2;
+            const hph = Math.acos(2 * Math.random() - 1);
+            // Vacíos: rechazo suave para generar regiones menos densas
+            const densityGate = Math.random();
+            if (densityGate < 0.45) {
+              nx = 0; ny = 0; nz = 0;
+            } else {
+              nx = hr * Math.sin(hph) * Math.cos(hth) * 0.9;
+              ny = hr * Math.sin(hph) * Math.sin(hth) * 0.35;
+              nz = hr * Math.cos(hph) * 0.9;
+            }
+          }
+          targetPositions.nebula[i3] = nx;
+          targetPositions.nebula[i3 + 1] = ny;
+          targetPositions.nebula[i3 + 2] = nz;
+        }
+        // ============================================================
+        // ORIÓN
+        // 7 estrellas principales (mayor densidad concentrada),
+        // cinturón de 3 muy denso, espada colgante, hombro y pie,
+        // rodeado de halo, polvo interestelar y estrellas secundarias.
+        // ============================================================
+        {
+          // Estrellas principales con pesos (1=principal brillante, 0=halo)
+          const orionStars = [
+            { x:  -3.0, y:  11.5, z:  0.0, r: 1.55, w: 1 }, // Betelgeuse (hombro sup. izq)
+            { x:   9.5, y:  10.5, z:  0.4, r: 1.20, w: 1 }, // Bellatrix  (hombro sup. der)
+            { x:  -1.0, y:  -9.0, z:  0.0, r: 1.30, w: 1 }, // Saiph       (pie inf. izq)
+            { x:   7.0, y:  -8.5, z:  0.3, r: 1.25, w: 1 }, // Rigel       (pie inf. der)
+            { x:  -2.0, y:   0.0, z:  0.0, r: 1.10, w: 1 }, // Alnitak     (cinturón izq)
+            { x:   0.2, y:   0.2, z:  0.1, r: 1.15, w: 1 }, // Alnilam     (cinturón centro)
+            { x:   2.6, y:   0.5, z:  0.0, r: 1.05, w: 1 }  // Mintaka     (cinturón der)
+          ];
+          const orionRoll = Math.random();
+          let ox, oy, oz;
+          if (orionRoll < 0.55) {
+            // Estrellas principales: distribución gaussiana densa
+            const star = orionStars[Math.floor(Math.random() * orionStars.length)];
+            const g1 = (Math.random() + Math.random() + Math.random() - 1.5) * 2.0;
+            const g2 = (Math.random() + Math.random() + Math.random() - 1.5) * 2.0;
+            const g3 = (Math.random() + Math.random() + Math.random() - 1.5) * 2.0;
+            const rr = Math.pow(Math.random(), 0.5);
+            ox = star.x + g1 * star.r * rr;
+            oy = star.y + g2 * star.r * rr;
+            oz = star.z + g3 * star.r * rr;
+          } else if (orionRoll < 0.78) {
+            // Espada / nebulosidad colgante del cinturón (cúmulo denso vertical)
+            const beltT = Math.random();
+            let bx, by;
+            if (beltT < 0.5) {
+              // Línea del cinturón (Alnitak - Alnilam - Mintaka) con grosor
+              const u = Math.random();
+              bx = -2.0 + u * 4.6;
+              by = 0.0 + (u - 0.5) * 0.7;
+            } else {
+              // Espada hacia abajo desde el cinturón
+              bx = (Math.random() - 0.5) * 3.5;
+              by = -0.5 - Math.random() * 6.0;
+            }
+            const bz = (Math.random() - 0.5) * 1.8;
+            // Cúmulo denso: distribución radial exponencial
+            const rg = -Math.log(1 - Math.random() * 0.95) * 0.6;
+            const ra = Math.random() * Math.PI * 2;
+            ox = bx + Math.cos(ra) * rg;
+            oy = by + Math.sin(ra) * rg;
+            oz = bz + (Math.random() - 0.5) * 0.8;
+          } else {
+            // Polvo interestelar, estrellas secundarias y halo amplio
+            const hr = Math.pow(Math.random(), 0.4);
+            const hth = Math.random() * Math.PI * 2;
+            if (hr < 0.55) {
+              // Estrellas secundarias dispersas (gaussiana pequeña)
+              ox = (Math.random() + Math.random() - 1) * 22;
+              oy = (Math.random() + Math.random() - 1) * 22;
+              oz = (Math.random() + Math.random() - 1) * 6;
+            } else if (hr < 0.85) {
+              // Polvo: banda elíptica alargada horizontal a la altura de la constelación
+              const bandR = 6 + Math.random() * 14;
+              const bandA = hth;
+              const bandE = 0.42 + Math.random() * 0.3;
+              ox = Math.cos(bandA) * bandR;
+              oy = Math.sin(bandA) * bandR * bandE;
+              oz = (Math.random() - 0.5) * 2.5;
+            } else {
+              // Halo difuso lejano
+              const hh = 14 + Math.random() * 10;
+              const ha = hth;
+              ox = Math.cos(ha) * hh;
+              oy = Math.sin(ha) * hh * 0.7;
+              oz = (Math.random() - 0.5) * 5;
+            }
+          }
+          targetPositions.orion[i3] = ox;
+          targetPositions.orion[i3 + 1] = oy;
+          targetPositions.orion[i3 + 2] = oz;
+        }
+        // ============================================================
+        // PAW (huella de perro)
+        // Almohadilla central anatómica en forma de trébol invertido,
+        // cuatro dedos ovalados con leve inclinación, base redondeada,
+        // hendidura superior, bordes suaves y volumen 3D uniforme.
+        // ============================================================
+        {
+          // Densidad relativa por zona:
+          //  - 4 dedos arriba: ~38% total
+          //  - Almohadilla central (trébol): ~52% total
+          //  - Halo difuso / borde suave: ~10% total
+          const pawRoll = Math.random();
+          let px, py, pz;
+          if (pawRoll < 0.38) {
+            // Dedos ovalados, ligeramente inclinados hacia el centro
+            // Distribución: 2 izq (más juntos), 2 der (más juntos)
+            const fingerRoll = Math.random();
+            let cx, cy, ax, ay, angle;
+            if (fingerRoll < 0.225) {
+              // Dedo exterior izquierdo (más separado)
+              cx = -8.2; cy = 9.0; ax = 2.3; ay = 3.4; angle = -0.55;
+            } else if (fingerRoll < 0.45) {
+              // Dedo interior izquierdo
+              cx = -3.4; cy = 10.2; ax = 2.1; ay = 3.2; angle = -0.28;
+            } else if (fingerRoll < 0.675) {
+              // Dedo interior derecho
+              cx =  2.6; cy = 10.4; ax = 2.0; ay = 3.1; angle =  0.22;
+            } else {
+              // Dedo exterior derecho (más separado)
+              cx =  7.4; cy = 9.4; ax = 2.2; ay = 3.3; angle =  0.5;
+            }
+            // Punto dentro de la elipse con densidad gaussiana
+            const gx = (Math.random() + Math.random() + Math.random() - 1.5) * 1.4;
+            const gy = (Math.random() + Math.random() + Math.random() - 1.5) * 1.4;
+            let lx = gx * ax;
+            let ly = gy * ay;
+            // Rotación del dedo
+            const ca = Math.cos(angle), sa = Math.sin(angle);
+            const rx = lx * ca - ly * sa;
+            const ry = lx * sa + ly * ca;
+            // Forma real del dedo: ligeramente más ancho en la base, puntiagudo arriba
+            const tNorm = (ry + ay) / (2 * ay); // 0 abajo, 1 arriba
+            const taper = 0.55 + 0.45 * (1 - tNorm);
+            lx *= taper;
+            // Volumen 3D: profundidad tipo cilindro elíptico
+            const depthShape = Math.sqrt(Math.max(0, 1 - (lx / ax) * (lx / ax)));
+            const pzLocal = (Math.random() - 0.5) * 2.2 * depthShape;
+            px = cx + rx;
+            py = cy + ry;
+            pz = pzLocal + (Math.random() - 0.5) * 0.4;
+          } else if (pawRoll < 0.90) {
+            // Almohadilla central anatómica: trébol invertido con hendidura superior
+            // Tres lóbulos: izquierdo, derecho, inferior
+            const padRoll = Math.random();
+            let lx, ly;
+            if (padRoll < 0.33) {
+              // Lóbulo izquierdo
+              const u = Math.random();
+              const v = Math.random();
+              const a = 4.6, b = 4.2, cx = -4.0, cy = -1.2;
+              lx = (u * 2 - 1) * a;
+              ly = (v * 2 - 1) * b;
+              if ((lx * lx) / (a * a) + (ly * ly) / (b * b) > 1) { lx *= 0.92; ly *= 0.92; }
+              lx += cx; ly += cy;
+            } else if (padRoll < 0.66) {
+              // Lóbulo derecho
+              const u = Math.random();
+              const v = Math.random();
+              const a = 4.4, b = 4.0, cx = 4.2, cy = -0.8;
+              lx = (u * 2 - 1) * a;
+              ly = (v * 2 - 1) * b;
+              if ((lx * lx) / (a * a) + (ly * ly) / (b * b) > 1) { lx *= 0.92; ly *= 0.92; }
+              lx += cx; ly += cy;
+            } else {
+              // Lóbulo inferior (base redondeada de la almohadilla)
+              const u = Math.random();
+              const v = Math.random();
+              const a = 5.6, b = 4.4, cx = 0.4, cy = -6.8;
+              lx = (u * 2 - 1) * a;
+              ly = (v * 2 - 1) * b;
+              if ((lx * lx) / (a * a) + (ly * ly) / (b * b) > 1) { lx *= 0.92; ly *= 0.92; }
+              lx += cx; ly += cy;
+            }
+            // Hendidura superior: reducir densidad en zona central-alta
+            const inNotch = (Math.abs(lx) < 1.6) && (ly > 1.5) && (ly < 4.5);
+            if (inNotch && Math.random() < 0.78) {
+              lx += (Math.random() - 0.5) * 3.2;
+              ly += (Math.random() - 0.5) * 1.5;
+            }
+            // Volumen 3D: forma de almohadilla, más gruesa en el centro
+            const radial = Math.sqrt(lx * lx + ly * ly) / 9.0;
+            const thickness = 2.6 * Math.max(0.2, 1 - radial * radial);
+            pz = (Math.random() - 0.5) * thickness;
+            px = lx;
+            py = ly;
+          } else {
+            // Halo difuso / borde suave: gaussianas delgadas alrededor del contorno
+            const edgeRoll = Math.random();
+            if (edgeRoll < 0.6) {
+              // Borde alrededor de los dedos
+              const fingerPick = Math.floor(Math.random() * 4);
+              const fins = [
+                { cx: -8.2, cy: 9.0, ax: 3.0, ay: 4.0 },
+                { cx: -3.4, cy: 10.2, ax: 2.7, ay: 3.8 },
+                { cx:  2.6, cy: 10.4, ax: 2.6, ay: 3.7 },
+                { cx:  7.4, cy: 9.4, ax: 2.9, ay: 3.9 }
+              ];
+              const f = fins[fingerPick];
+              px = f.cx + (Math.random() - 0.5) * f.ax * 2;
+              py = f.cy + (Math.random() - 0.5) * f.ay * 2;
+              pz = (Math.random() - 0.5) * 0.6;
+            } else {
+              // Borde alrededor de la almohadilla
+              const a = 11, b = 11.5;
+              const u = Math.random() * Math.PI * 2;
+              const r = 9.5 + Math.random() * 1.8;
+              px = Math.cos(u) * r * (a / 12) + 0.3;
+              py = Math.sin(u) * r * (b / 12) - 3.2;
+              pz = (Math.random() - 0.5) * 0.5;
+            }
+          }
+          targetPositions.paw[i3] = px;
+          targetPositions.paw[i3 + 1] = py;
+          targetPositions.paw[i3 + 2] = pz;
+        }
+      }
+    }
+
+    // Arranca todo lo del 3D
+    function initThree() {
+      const container = document.getElementById("canvas-container");
+
+      scene = new THREE.Scene();
+      scene.fog = new THREE.FogExp2(0x050505, 0.012);
+
+      camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.position.set(0, 5, 58);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      container.appendChild(renderer.domElement);
+
+      controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.05;
+
+      generateModelPositions();
+
+      particleGeometry = new THREE.BufferGeometry();
+      particleGeometry.setAttribute(
+        "position",
+        new THREE.BufferAttribute(new Float32Array(targetPositions.tree), 3)
+      );
+
+      const material = new THREE.PointsMaterial({
+        size: 0.34,
+        color: new THREE.Color(document.getElementById("particle-color").value),
+        transparent: true,
+        opacity: 0.95,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        sizeAttenuation: true
+      });
+
+      particleSystem = new THREE.Points(particleGeometry, material);
+      scene.add(particleSystem);
+
+      window.addEventListener("resize", onWindowResize);
+    }
+
+    // Todo lo relacionado con la cámara y la detección de la mano
+    function initWebcamAndAI() {
+      const videoElement = document.getElementById("webcam");
+      const statusBox = document.getElementById("gesture-status");
+      const loadingText = document.getElementById("loading");
+
+      if (!window.Hands || !window.Camera) {
+        loadingText.textContent = "No se pudo cargar MediaPipe. Revisa tu conexión o recarga la página. Las partículas seguirán funcionando.";
+        statusBox.textContent = "Falló la IA de gestos, pero el sistema de partículas sigue funcionando.";
+        setTimeout(() => loadingText.remove(), 3000);
+        return;
+      }
+
+      const hands = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+      });
+
+      hands.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
+
+      hands.onResults((results) => {
+        if (loadingText && document.body.contains(loadingText)) {
+          loadingText.style.opacity = "0";
+          setTimeout(() => loadingText.remove(), 500);
+        }
+
+        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+          statusBox.classList.add("active");
+
+          const hand1 = results.multiHandLandmarks[0];
+          const wrist = hand1[0];
+          const thumbTip = hand1[4];
+          const thumbIP = hand1[3];
+          const indexMcp = hand1[5];
+          const indexPip = hand1[6];
+          const indexTip = hand1[8];
+          const middlePip = hand1[10];
+          const middleTip = hand1[12];
+          const ringPip = hand1[14];
+          const middleBase = hand1[9];
+          const ringTip = hand1[16];
+          const pinkyPip = hand1[18];
+          const pinkyTip = hand1[20];
+
+          const palmSize = Math.hypot(wrist.x - middleBase.x, wrist.y - middleBase.y) || 0.08;
+          const palmCenterX = (wrist.x + middleBase.x) * 0.5;
+          const palmCenterY = (wrist.y + middleBase.y) * 0.5;
+
+          const fingertipSpread =
+            (
+              Math.hypot(thumbTip.x - palmCenterX, thumbTip.y - palmCenterY) +
+              Math.hypot(indexTip.x - palmCenterX, indexTip.y - palmCenterY) +
+              Math.hypot(middleTip.x - palmCenterX, middleTip.y - palmCenterY) +
+              Math.hypot(ringTip.x - palmCenterX, ringTip.y - palmCenterY) +
+              Math.hypot(pinkyTip.x - palmCenterX, pinkyTip.y - palmCenterY)
+            ) / 5;
+
+          const openness = fingertipSpread / palmSize;
+
+          const thumbCurled =
+            Math.hypot(thumbTip.x - palmCenterX, thumbTip.y - palmCenterY) <
+            Math.hypot(thumbIP.x - palmCenterX, thumbIP.y - palmCenterY) * 1.1;
+          const indexCurled = Math.hypot(indexTip.x - wrist.x, indexTip.y - wrist.y) < Math.hypot(indexPip.x - wrist.x, indexPip.y - wrist.y) * 1.08;
+          const middleCurled = Math.hypot(middleTip.x - wrist.x, middleTip.y - wrist.y) < Math.hypot(middlePip.x - wrist.x, middlePip.y - wrist.y) * 1.08;
+          const ringCurled = Math.hypot(ringTip.x - wrist.x, ringTip.y - wrist.y) < Math.hypot(ringPip.x - wrist.x, ringPip.y - wrist.y) * 1.08;
+          const pinkyCurled = Math.hypot(pinkyTip.x - wrist.x, pinkyTip.y - wrist.y) < Math.hypot(pinkyPip.x - wrist.x, pinkyPip.y - wrist.y) * 1.12;
+          const curledCount = [indexCurled, middleCurled, ringCurled, pinkyCurled].filter(Boolean).length;
+          const isFist = openness < 1.9 && thumbCurled && curledCount >= 3;
+
+          const handCenterX = (wrist.x + middleBase.x + hand1[5].x + hand1[17].x) * 0.25;
+          const handCenterY = (wrist.y + middleBase.y + hand1[5].y + hand1[17].y) * 0.25;
+          targetRotationY = -(handCenterX - 0.5) * Math.PI * 1.8;
+          targetRotationX = (handCenterY - 0.5) * Math.PI * 1.1;
+
+          if (isFist) {
+            const distanceScale = mapPalmSizeToScale(palmSize);
+            targetGestureScale = THREE.MathUtils.clamp(distanceScale, MIN_GESTURE_SCALE, MAX_GESTURE_SCALE);
+          } else {
+            targetGestureScale = 1.0;
+          }
+
+          statusBox.innerHTML =
+            `Estado del gesto:${isFist ? "Puño" : "Mano abierta"}　Escala: ${targetGestureScale.toFixed(2)}<br>` +
+            `${isFist ? "Entre más acerques el puño, más grande será el modelo." : "Con la mano abierta solo rota el modelo."}`;
+        } else {
+          statusBox.classList.remove("active");
+          statusBox.textContent = "No detecto ninguna mano. Ponla frente a la cámara.";
+          targetGestureScale = 1.0;
+        }
+      });
+
+      const cameraUtils = new Camera(videoElement, {
+        onFrame: async () => {
+          await hands.send({ image: videoElement });
+        },
+        width: 640,
+        height: 480
+      });
+
+      cameraUtils.start()
+        .then(() => {
+          statusBox.textContent = "Cámara iniciada. Muestra una mano frente a ella.";
+        })
+        .catch((err) => {
+          console.error(err);
+          loadingText.textContent = "No pude acceder a la cámara. Dale permiso al navegador y abre la página desde localhost.";
+          statusBox.textContent = "No se pudo iniciar la cámara. Aún puedes mover el modelo con el mouse.";
+        });
+    }
+
+    // Bucle principal, esto corre todo el tiempo
+    function animate() {
+      requestAnimationFrame(animate);
+
+      if (!particleSystem || !particleGeometry) return;
+
+      gestureScale += (targetGestureScale - gestureScale) * 0.12;
+
+      const actualScale = BASE_MODEL_SCALE * gestureScale;
+
+      particleSystem.rotation.y += (targetRotationY - particleSystem.rotation.y) * 0.05;
+      particleSystem.rotation.x += (targetRotationX - particleSystem.rotation.x) * 0.05;
+
+      const positions = particleGeometry.attributes.position.array;
+      const targetArray = targetPositions[currentModel];
+
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const i3 = i * 3;
+        positions[i3] += (targetArray[i3] * actualScale - positions[i3]) * 0.08;
+        positions[i3 + 1] += (targetArray[i3 + 1] * actualScale - positions[i3 + 1]) * 0.08;
+        positions[i3 + 2] += (targetArray[i3 + 2] * actualScale - positions[i3 + 2]) * 0.08;
+      }
+
+      particleGeometry.attributes.position.needsUpdate = true;
+
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function setupUI() {
+      const modelSelect = document.getElementById("model-select");
+      const colorInput = document.getElementById("particle-color");
+      const colorHex = document.getElementById("color-hex");
+
+      modelSelect.addEventListener("change", (e) => {
+        currentModel = e.target.value;
+      });
+
+      colorInput.addEventListener("input", (e) => {
+        const color = e.target.value;
+        colorHex.textContent = color;
+        document.documentElement.style.setProperty("--accent-color", color);
+        if (particleSystem) particleSystem.material.color.set(color);
+      });
+
+      document.getElementById("btn-fullscreen").addEventListener("click", () => {
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen();
+        } else {
+          document.exitFullscreen();
+        }
+      });
+    }
+
+    window.addEventListener("DOMContentLoaded", () => {
+      initThree();
+      setupUI();
+      animate();
+      initWebcamAndAI();
+    });
+  </script>
+</body>
+</html>
